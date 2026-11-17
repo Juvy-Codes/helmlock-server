@@ -1,0 +1,21 @@
+{
+  "name": "helmlock-server",
+  "version": "1.1.0",
+  "description": "HelmLock backend: API for the app, scan route for the locker cabinet (ESP32), SMS notices",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node --test test/e2e.test.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  },
+  "optionalDependencies": {
+    "nodemailer": "^6.9.16"
+  }
+}

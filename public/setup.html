@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HelmLock Setup</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background: #0f0f10; color: #eee; margin: 0; padding: 16px; max-width: 640px; margin-inline: auto; }
+  h1 { font-size: 20px; color: #ef4444; }
+  h2 { font-size: 15px; margin: 22px 0 8px; }
+  .card { background: #1a1a1c; border: 1px solid #2a2a2e; border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  input, button { font: inherit; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #101012; color: #eee; width: 100%; box-sizing: border-box; margin: 4px 0; }
+  button { background: #dc2626; border: 0; font-weight: 600; cursor: pointer; }
+  button.alt { background: #333; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .ok { color: #4ade80; } .bad { color: #f87171; } .warn { color: #facc15; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; margin: 6px 0 0; }
+  .small { font-size: 12px; color: #999; }
+  .hide { display: none; }
+</style>
+</head>
+<body>
+<h1>HelmLock server check</h1>
+
+<div id="login" class="card">
+  <b>Admin login</b>
+  <input id="email" placeholder="Admin email" autocomplete="username" value="admin@helmlock.test">
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="loginBtn">Log in</button>
+  <div id="loginMsg" class="bad"></div>
+</div>
+
+<div id="main" class="hide">
+  <h2>1. Is everything set up?</h2>
+  <div class="card" id="status">Loading...</div>
+
+  <h2>2. Send a test SMS</h2>
+  <div class="card">
+    <input id="smsNumber" placeholder="09171234567" inputmode="numeric">
+    <button id="smsBtn">Send test SMS</button>
+    <pre id="smsOut"></pre>
+    <div class="small">If the driver is "log", nothing is sent. The text only appears in the server log.</div>
+  </div>
+
+  <h2>3. Cabinet simulator (no hardware needed)</h2>
+  <div class="card">
+    <div class="small">Does what the cabinet does. Copy the QR text from the app's QR screen, or paste any code.</div>
+    <input id="simToken" placeholder="QR text (64 characters)">
+    <input id="simCoins" placeholder="Coins inserted (pesos)" inputmode="numeric" value="0">
+    <input id="simLocker" placeholder="Locker number" value="01">
+    <label class="small"><input id="simDry" type="checkbox" style="width:auto"> Only check (dry run), don't change anything</label>
+    <button id="simBtn">Scan</button>
+    <pre id="simOut"></pre>
+  </div>
+
+  <h2>4. Latest SMS</h2>
+  <div class="card"><button id="logBtn" class="alt">Refresh</button><pre id="smsLog"></pre></div>
+</div>
+
+<script>
+let token = '';
+const $ = (id) => document.getElementById(id);
+
+async function api(method, path, body) {
+  const res = await fetch('/api' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+  return data;
+}
+
+function line(parent, text, cls) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  if (cls) d.className = cls;
+  parent.appendChild(d);
+}
+
+async function loadStatus() {
+  const s = await api('GET', '/admin/status');
+  const box = $('status');
+  box.textContent = '';
+  line(box, 'Server is running', 'ok');
+  line(box, s.storage === 'postgres' ? 'Data is saved in the online database' : 'Data is saved in a local file (data is lost if the host restarts)', s.storage === 'postgres' ? 'ok' : 'warn');
+  line(box, 'SMS driver: ' + s.sms_driver, s.sms_driver === 'log' ? 'warn' : 'ok');
+  line(box, s.locker_key_is_default ? 'LOCKER_KEY is still the default. Change it!' : 'LOCKER_KEY is set', s.locker_key_is_default ? 'bad' : 'ok');
+  if (s.last_cabinet_contact) {
+    const mins = Math.round((Date.now() - new Date(s.last_cabinet_contact)) / 60000);
+    line(box, 'Cabinet last seen ' + (mins < 1 ? 'just now' : mins + ' min ago'), mins < 3 ? 'ok' : 'warn');
+  } else {
+    line(box, 'Cabinet has not contacted the server yet', 'warn');
+  }
+  line(box, 'Lockers: ' + s.lockers.map((l) => l.number + ' (' + l.status + ')').join(', '));
+}
+
+async function loadLog() {
+  const r = await api('GET', '/admin/sms-log');
+  $('smsLog').textContent = r.sms.slice(0, 15).map((m) => `${m.created_at.slice(11, 16)} ${m.status.toUpperCase()} ${m.to}: ${m.text}${m.error ? ' [' + m.error + ']' : ''}`).join('\n') || 'No messages yet.';
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginMsg').textContent = '';
+  try {
+    const r = await api('POST', '/login', { email: $('email').value, password: $('password').value });
+    if (r.user.role !== 'admin') throw new Error('This page is for admins only.');
+    token = r.token;
+    $('login').classList.add('hide');
+    $('main').classList.remove('hide');
+    await loadStatus();
+    await loadLog();
+  } catch (e) { $('loginMsg').textContent = e.message; }
+};
+
+$('smsBtn').onclick = async () => {
+  $('smsOut').textContent = 'Sending...';
+  try {
+    const r = await api('POST', '/admin/sms-test', { mobile: $('smsNumber').value });
+    $('smsOut').textContent = 'Result: ' + r.sms.status + (r.sms.error ? ' (' + r.sms.error + ')' : '') + '\n' + r.sms.text;
+    loadLog();
+  } catch (e) { $('smsOut').textContent = e.message; }
+};
+
+$('simBtn').onclick = async () => {
+  $('simOut').textContent = 'Scanning...';
+  try {
+    const r = await api('POST', '/admin/simulate-scan', { token: $('simToken').value.trim(), coins: Number($('simCoins').value) || 0, locker: $('simLocker').value.trim(), dry: $('simDry').checked });
+    $('simOut').textContent = JSON.stringify(r, null, 2);
+    loadStatus();
+  } catch (e) { $('simOut').textContent = e.message; }
+};
+
+$('logBtn').onclick = loadLog;
+</script>
+</body>
+</html>
