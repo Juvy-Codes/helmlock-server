@@ -117,6 +117,7 @@ export function createApp() {
   admin.post('/lockers/:id/release', h((req) => svc.adminReleaseLocker(req.user, req.params.id)));
   admin.get('/reservations', h((req) => svc.adminReservations(req.query)));
   admin.get('/students', h((req) => svc.adminStudents(req.query)));
+    admin.post('/students/:id/block', h((req) => svc.adminBlockStudent(req.user, req.params.id, (req.body || {}).hours)));
   admin.post('/students/:id/unblock', h((req) => svc.adminUnblockStudent(req.user, req.params.id)));
   admin.get('/reports', h(() => svc.adminReports()));
   admin.post('/reports/:id/toggle', h((req) => svc.adminToggleReport(req.params.id)));
